@@ -1,0 +1,360 @@
+---
+title: "Descriptive Analysis"
+author: "Cesar Soto Valero"
+fig_caption: TRUE
+date: "Feb 18, 2018"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_retina: 2
+  html_notebook: default
+  pdf_document: default
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# import libraries
+library(tidyverse)
+library(ggpubr)
+library(ggridges)
+library(ggcorrplot)
+library(caret)
+library(factoextra)
+library(Boruta)
+library(randomForest)
+library(DT)
+library(RANN)
+library(car)
+library(MASS)
+library(gplots)
+library(multcomp)
+library(psych)
+library(plotly)
+library(lubridate)
+theme_set(theme_bw())
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# reading the datasets
+ranking <- read.csv(file = "data/Ranking.csv")
+puntos <- read.csv(file = "data/Puntos.csv")
+tarjetas_rojas <- read.csv(file = "data/Tarjetas Rojas.csv")
+tarjetas_amarillas <- read.csv(file = "data/Tarjetas Amarillas.csv")
+local_o_visitante <- read.csv(file = "data/Local o Visitante.csv")
+goles_en_contra <- read.csv(file = "data/Goles en Contra.csv")
+goles_a_favor <- read.csv(file = "data/Goles a Favor.csv")
+goles_de_penalty <- read.csv(file = "data/Goles de Penalty.csv")
+gana_pierde_empata <- read.csv(file = "data/Gana Pierde Empata.csv")
+arbitro <- read.csv(file = "data/Arbitro.csv")
+rival <- read.csv(file = "data/Rival.csv")
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# data tyding
+a <- gather(puntos, key = Game, value = Points, 3:46)
+b <- gather(ranking, key = Game, value = Ranking, 3:46)
+c <- gather(tarjetas_rojas, key = Game, value = Red_Cards, 3:46)
+d <- gather(tarjetas_amarillas, key = Game, value = Yellow_Cards, 3:46)
+e <- gather(local_o_visitante, key = Game, value = Location, 3:46)
+f <- gather(goles_en_contra, key = Game, value = Goals_Received, 3:46)
+g <- gather(goles_a_favor, key = Game, value = Goals_Scored, 3:46)
+h <- gather(goles_de_penalty, key = Game, value = Penalty_Goals, 3:46)
+i <- gather(gana_pierde_empata, key = Game, value = Game_Result, 3:46)
+j <- gather(arbitro, key = Game, value = Referee , 3:46)
+
+k <- rival %>% dplyr::select(c(1, 2,3,5,7,9,11,13,15,17,19,21,13,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,57,59,61,63,65,67,69,71,73,75,77,79,81,83,85,87,89))
+k <- gather(k, key = Game, value = Opponent, 3:45)
+
+
+l <- rival %>% dplyr::select(c(1, 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40,42,44,46,48,50,52,54,56,58,60,62,64,66,68,70,72,74,76,78,80,82,84,86,88,90))
+l <- l %>% dplyr::rename(
+  J1 = "JP1",
+  J2 = "JP2",
+  J3 = "JP3",
+  J4 = "JP4",
+  J5 = "JP5",
+  J6 = "JP6",
+  J7 = "JP7",
+  J8 = "JP8",
+  J9 = "JP9",
+  J10 = "JP10",
+  J11 = "JP11",
+  J12 = "JP12",
+  J13 = "JP13",
+  J14 = "JP14",
+  J15 = "JP15",
+  J16 = "JP16",
+  J17 = "JP17",
+  J18 = "JP18",
+  J19 = "JP19",
+  J20 = "JP20",
+  J21 = "JP21",
+  J22 = "JP22",
+  J23 = "JP23",
+  J24 = "JP24",
+  J25 = "JP25",
+  J26 = "JP26",
+  J27 = "JP27",
+  J28 = "JP28",
+  J29 = "JP29",
+  J30 = "JP30",
+  J31 = "JP31",
+  J32 = "JP32",
+  J33 = "JP33",
+  J34 = "JP34",
+  J35 = "JP35",
+  J36 = "JP36",
+  J37 = "JP37",
+  J38 = "JP38",
+  J39 = "JP39",
+  J40 = "JP40",
+  J41 = "JP41",
+  J42 = "JP42",
+  J43 = "JP43",
+  J44 = "JP44"
+  )
+
+l <- gather(l, key = Game, value = JP, 3:46)
+
+
+# joining the datasets
+x1 <- full_join(a, b, by = c("Temporada", "Equipo", "Game"))
+x2 <- full_join(x1, c, by = c("Temporada", "Equipo", "Game"))
+x3 <- full_join(x2, d, by = c("Temporada", "Equipo", "Game"))
+x4 <- full_join(x3, e, by = c("Temporada", "Equipo", "Game"))
+x5 <- full_join(x4, f, by = c("Temporada", "Equipo", "Game"))
+x6 <- full_join(x5, g, by = c("Temporada", "Equipo", "Game"))
+x7 <- full_join(x6, h, by = c("Temporada", "Equipo", "Game"))
+x8 <- full_join(x7, i, by = c("Temporada", "Equipo", "Game"))
+x9 <- full_join(x8, j, by = c("Temporada", "Equipo", "Game"))
+x10 <- full_join(x9, k, by = c("Temporada", "Equipo", "Game"))
+x11 <- full_join(x10, l, by = c("Temporada", "Equipo", "Game"))
+
+# the final dataset
+data <- x11 %>% dplyr::rename(Team = "Equipo", Season = "Temporada")
+
+
+data$Season <- substr(data$Season, 1 , 4)
+data$Season <- as.numeric(data$Season)
+data$Season <- data$Season + 1
+data$Season <- as.character(data$Season)
+
+```
+
+
+
+# Summary
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+data <- na.omit(data)
+
+data <- data %>% mutate(Goals_Diff = Goals_Scored - Goals_Received)
+data <- data %>% 
+  select(
+    c(
+      Season,
+      Team,
+      Opponent,
+      Game,
+      Goals_Scored,
+      Goals_Received,
+      Goals_Diff,
+      Game_Result,
+      Points,
+      Ranking,
+      Location,
+      Yellow_Cards,
+      Red_Cards,
+      Penalty_Goals,
+      JP,
+      Referee
+    )
+  )
+
+data$Season <- as.integer(data$Season)
+data$Team <- as.factor(data$Team)
+data$Opponent <- as.factor(data$Opponent)
+data$Game <- as.factor(data$Game)
+data$Game_Result <- as.factor(data$Game_Result)
+data$Referee <- as.factor(data$Referee)
+data$Location <- as.factor(data$Location)
+
+# write.csv(data, file = "data.csv")
+save(data, file = "data/data.RData")
+
+```
+
+# Load the dataset
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+load(file = "data/data.RData")
+```
+
+
+# Descriptive Analysis
+
+## Games Played per Team
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data %>% group_by(Team) %>% summarise(Games_Played = n()) %>% arrange(desc(Games_Played))
+
+
+
+```
+
+## Goals Scored
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tmp <- data %>%
+  group_by(Team) %>%
+  summarise(Mean_Goals_Scored = mean(Goals_Scored))
+tmp <- tmp[order(tmp$Mean_Goals_Scored),]  # sort
+tmp$`Team` <- factor(tmp$`Team`, levels = tmp$`Team`)  # convert to factor to retain sorted order in plot
+  
+tmp %>% ggplot(aes(Team, Mean_Goals_Scored, fill = Team)) +
+  geom_bar(stat = "identity", width = .5) +
+  labs(x = "Team", y = "Mean Goals Scored", title = "Goals Scored per Game") +
+  theme(axis.text.y = element_text(size = 4)) +
+  theme(legend.position = "none") +
+  coord_flip()
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+data$Season <- as.Date(as.character(data$Season), format = "%Y")
+
+data %>% 
+  filter(Team == "Real Madrid" | Team == "Barcelona") %>%
+  group_by(Season, Team) %>% 
+  summarise(Mean_Goals_Diff = mean(Goals_Diff)) %>% 
+  
+  ggplot(aes(Season, color = Team)) +
+  geom_line(aes(y = Mean_Goals_Diff), size = 1) +
+  scale_color_manual(values = c("red", "blue")) +
+  theme(legend.position = "bottom") +
+  labs(x = NULL, y = "Goals Scored - Goals Received") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_date(date_labels = "%Y", date_breaks = "3 years")
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Yellow Cards
+tmp <- data %>%
+  group_by(Game) %>%
+  summarise(Total_Yellow_Cards = sum(Yellow_Cards), Total_Red_Cards = sum(Red_Cards))
+
+tmp <- tmp[order(tmp$Total_Yellow_Cards),]  # sort
+tmp$`Game` <- factor(tmp$`Game`, levels = tmp$`Game`)  # convert to factor to retain sorted order in plot
+  
+tmp %>% ggplot(aes(Game, Total_Yellow_Cards, fill = Game)) +
+  geom_bar(stat = "identity", width = .5) +
+  labs(x = "Game", y = "Summ of Yellow Cards", title = "Total Yellow Cards per Game") +
+  theme(axis.text.y = element_text(size = 5)) +
+  theme(legend.position = "none") +
+  coord_flip()
+
+
+# Red Cards
+tmp <- tmp[order(tmp$Total_Red_Cards),]  # sort
+tmp$`Game` <- factor(tmp$`Game`, levels = tmp$`Game`)  # convert to factor to retain sorted order in plot
+tmp %>% ggplot(aes(Game, Total_Red_Cards, fill = Game)) +
+  geom_bar(stat = "identity", width = .5) +
+  labs(x = "Game", y = "Summ of Red Cards", title = "Total Red Cards per Game") +
+  theme(axis.text.y = element_text(size = 5)) +
+  theme(legend.position = "none") +
+  coord_flip()
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(data, aes(Team, fill = Game_Result)) +
+  xlab(NULL) + ylab(NULL) +
+  theme(legend.position = "right") +
+  geom_bar(position = "fill", width = .75) +
+  labs(title = "Game Results per Team") +
+  theme(axis.text.y = element_text(size = 5)) +
+  coord_flip() 
+```
+
+
+## Location Effect
+
+What are the teams that better play on their own field?
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+tmp <- data %>% 
+  select(Team, Location, Game_Result) %>%
+  filter(Team == "Real Madrid" | Team == "Barcelona" | Team == "Atlético de Madrid")
+
+
+tmp %>% ggplot(aes(Game_Result, Team, color = Location)) +
+  geom_jitter(size = .25) +
+  labs(x = "Game Results", title = "Effect of Location on Game Results")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,814 @@
+---
+title: "Causal Impact of Adopting the Three Points per Victory based Score System on the Competitive Balance of Spanish Football League"
+author: "Cesar Soto Valero"
+fig_caption: TRUE
+date: "Mar 5, 2018"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_retina: 2
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# import libraries
+library(tidyverse)
+library(dtw)
+library(dtwclust)
+library(ggpubr)
+library(ggridges)
+library(ggcorrplot)
+library(caret)
+library(factoextra)
+library(Boruta)
+library(randomForest)
+library(DT)
+library(ggridges)
+library(RANN)
+library(car)
+library(MASS)
+library(gplots)
+library(multcomp)
+library(psych)
+library(plotly)
+library(lubridate)
+library(dendextend)
+library(broom)
+library(NbClust)
+library(fpc)
+library(devtools)
+library(CausalImpact)
+library(forecast)
+
+library(foreach)
+library(parallel)
+library(data.table)
+library(iterators)
+library(utils)
+theme_set(theme_bw())
+
+
+library(tikzDevice)
+library(ggplot2)
+#For some reason, Rstudio needs to know the time zone...
+options(tz="CA")
+
+load(file = "data/data.RData")
+load(file = "data/weather.rda")
+
+
+summary(data)
+
+
+a <- data %>% filter(Season >= 1930 & Season < 1940)
+# total teams
+a %>% select(Team) %>% distinct() %>% nrow()
+# games played
+nrow(a)
+# game result
+a_L <- a %>% filter(Location == "L")
+table(a_L$Game_Result)
+# ---------------------------------------------------
+a <- data %>% filter(Season >= 2010 & Season < 2017)
+# total teams
+a %>% select(Team) %>% distinct() %>% nrow()
+# games played
+nrow(a)
+# game result
+a_L <- a %>% filter(Location == "L")
+table(a_L$Game_Result)
+
+
+```
+
+# Introduction
+
+The competition format of the [Spanish Football League](https://en.wikipedia.org/wiki/La_Liga) follows the usual double round-robin format. During the course of a season, which lasts from August to May, each club plays every other club twice, once at home and once away. Until 1995-96, teams receive **two** points for a win, one point for a draw, and no points for a loss. Since 1996, teams receive **three** points for a win, one point for a draw, and no points for a loss
+Teams are ranked by total points, with the highest-ranked club at the end of the season crowned champion.
+
+The **main goal** of this report is the following:
+
+> Assess the impact of adopting the three points per victory score system on the competitive balance of the different teams' levels in LaLiga.
+
+For this aim, we perfom a three-steps data analysis approach as follow:
+
+1. Clustering teams according to their historical performance (Win Ratios).
+
+2. Calculate the Kendall's tau coefficient (from relative standard deviations of seasons) to obtain the overall ranking turnover of teams between consecutive seasons.
+
+3. Assess the causal impact of the adoption in the score system, based on the Kendall's tau coefficients, for each different cluster of teams.
+
+# Standard Measure of Teams' Performance
+
+The Win Ratio ($\text{WR}$) of a team $t$ is measured as follow
+
+$$
+\begin{equation}
+\text{WR}_t = \dfrac{W_t}{W_t + L_t + D_t} 
+\end{equation}
+$$
+
+
+where $W = \text{Games Win}$, $L = \text{Games Lost}$ and $D = \text{Ties}$
+
+
+# Standard Measures of Competitive Balance
+
+## Relative Standard Deviation
+
+The Actual Standard Deviation ($\text{ASD}$) of the teams' win ratios (or, equivalently, win percentages) in a single season is a natural measure of competitive balance. This can be represented as
+
+$$
+\begin{equation}
+\text{ASD} = \sqrt{\sum_{t=1}^{n}\dfrac{(\text{WR}_t - \text{0.5})^2}{n}} 
+\end{equation}
+$$
+
+where $\text{WR}_t$ is the Win Ratio of team $t$ and $n$ is the number of teams in the league. A smaller standard deviation of win ratios across teams in a season indicates a more equal competition.
+
+However, when comparing values of $\text{ASD}$, either for the same league over time or across different leagues, $n$ and/or $\text{WR_t}$ are typically not constant. Other things equal, $\text{ASD}$ tends to decrease as $\text{WR_t}$ increases because there is likely to be less random noise in the final outcomes. Hence, it is common to compare $\text{ASD}$ to a benchmark Idealized Standard Deviation ($\text{IED}$) corresponding to an ex ante representation of a perfectly balanced league in which each team has an equal probability of winning each game. In the absence of ties, the idealized standard deviation, can be derived as the standard deviation of a binomially distributed random variable with a (constant) probability of success of $0.5$ across independent trials. The formula is represented as 
+
+
+$$
+\begin{equation}
+\text{ISD} = \dfrac{0.5}{\sqrt{\text{WR}}}
+\end{equation}
+$$
+
+The Relative Starndard Deviation ($\text{RSD}$) is the ratio of the actual standard deviation to an idealized standard deviation. Therefore, as $\text{WR}$ increases, any reduction in $\text{ASD}$ will be compared against the reduced value of the benchmark $\text{ISD}.
+
+$$
+\begin{equation}
+\text{RSD} = \dfrac{\text{ASD}}{\text{ISD}}
+\end{equation}
+$$
+
+The ideal ratio is 1. The higher the ratio, the more the actual spread diverges from the ideal one and hence the worse the competitive balance.
+
+## Kendall's tau Coefficient
+
+The Kendall's tau coefficient $\tau$ index illustrates the overall ranking turnover within a league between two seasons. The calculation of $\tau$ is based on the number of transpositions ($s$) required to transform a particular rank
+order to another specific order. In essence, $s$ is compared with the maximum possible transpositions ($s_{\text{max}}$), which is equal to $n(n–1)/2$. The formula of the $\tau$ index is given by:
+
+$$
+\begin{equation}
+\tau' = 1 - \dfrac{2s}{s_{\text{max}}} = 1 - \dfrac{4s}{n(n-1)}
+\end{equation}
+$$
+
+which in its original definition defined in the interval from –1 and 1. Here, we denote by τ the following rescaled modification:
+
+$$
+\begin{equation}
+\tau' = \dfrac{1+ \tau'}{2} = 1 - \dfrac{2s}{n(n-1)}
+\end{equation}
+$$
+This rescaled version of the index lies in the interval from zero to one, which corresponds to the cases of a dynamically perfectly balanced and completely unbalanced league, respectively.
+
+# Analysis of Overall Competitive Balance
+
+## RSD analysis for all teams
+
+In general, the higher is RSD the lower is the competitive balance (and the higher is the *competitive unequality*)
+
+
+```{r}
+
+data %>% 
+  group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts)) %>% 
+  filter(Season == 1929) %>% 
+  arrange(Win_Ratio)
+  
+  
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>% 
+  summarise(Count = n())
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+ASD <- tmp %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  mutate(SD = ((Win_Ratio - 0.5))/Count) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(SD = sum(SD)) %>% 
+  mutate(ASD = sqrt(abs(SD)))
+    
+
+a <- data %>% 
+  group_by(Season) %>%
+  summarise(Matches = n())
+
+
+b <- tmp %>% summarise(Number_of_teams = sum(Count/Count)) 
+
+ISD <- tmp <- full_join(a, b, by = "Season") %>% mutate(Number_of_games = Matches/Number_of_teams) %>% mutate(ISD = 0.5/sqrt(Number_of_games))
+
+
+RSD <- full_join(ASD, ISD, by = "Season") %>% select(Season, ASD, ISD) %>% mutate(RSD = ASD/ISD)
+
+
+# SD$SD <- SD$SD * sqrt(SD$SD)/(0.5)
+
+RSD %>% ggplot(aes(Season, RSD)) +
+  geom_point(size = 2, alpha = 0.5) +
+  geom_smooth(span = 0.2, size = 1.5, method = "lm") +
+  labs(y = "RSD") +
+  scale_y_continuous(limits = c(0.125, 0.226))
+
+# "Overall change in the competitive balance from 1928/29 to 2016/17"
+
+```
+
+
+# Clustering Spanish Football Teams based on Their Historical Performance
+
+We dissect the teams according to their historical Win Ratios (WRs). We use hierarchical k-mean clustering in order to cluster the teams. Our aim is to separate the teams into three different levels of performance and study the competitive balance in each cluster separately. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# data preprocessing
+df <-
+  data %>% 
+  group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts)) %>% 
+  dplyr::select(Season, Team, Win_Ratio) %>% 
+  ungroup() 
+
+df_t <- df %>% spread(key = Season, value = Win_Ratio) 
+df_t$Team <- as.character(df_t$Team)
+
+# inpute missing values with the mean
+df <- df_t  %>% mutate_all(funs(ifelse(is.na(.), 0, .))) 
+
+rownames(df) <- df$Team
+df$Team <- NULL
+
+```
+
+Hierarchical k-means clustering:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+set.seed(1)
+library(proxy)
+res.hk <- hkmeans(df, 3)
+# Elements returned by hkmeans()
+
+# #Create a .tex file that will contain your plot as vectors
+# #You need to set the size of your plot here, if you do it in LaTeX, font consistency with the rest of the document will be lost
+# tikz(file = "plot_test.tex", width = 5, height = 5)
+
+
+# Visualize the tree
+plot <- fviz_dend(
+  res.hk,
+  cex = 0.4,
+  palette = c("darkred", "darkgreen", "darkblue"),
+  # rect = TRUE,
+  rect_fill = TRUE,
+  horiz = TRUE,
+  type = "circular"
+) 
+plot
+
+# #This line is only necessary if you want to preview the plot right after compiling
+# print(plot)
+# #Necessary to close or the tikxDevice .tex file will not be written
+# dev.off()
+
+```
+
+2D projection of the clusters:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Visualize the hkmeans final clusters
+fviz_cluster(res.hk,
+             palette = c("darkred", "darkgreen", "darkblue"),
+             repel = TRUE,
+             ggtheme = theme_classic())
+
+
+clusters <- as.data.frame(res.hk$cluster) %>% dplyr::rename(Cluster = "res.hk$cluster")
+names <- as.data.frame(row.names(clusters)) %>% dplyr::rename(Team = "row.names(clusters)")
+
+```
+
+Phylogenic visualization of the clusters:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+require("igraph")
+fviz_dend(res.hk, k = 3, palette = c("darkred", "darkgreen", "darkblue"),
+          type = "phylogenic", repel = TRUE, layout = "layout_as_tree")
+```
+
+
+## Teams' Clusters
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# save the clusters
+clusters$Team <- names$Team
+
+vis_clusters <- clusters
+vis_clusters$Team <- NULL
+DT::datatable(vis_clusters, style = "bootstrap", fillContainer = TRUE)
+```
+
+# Analysis of Competitive Balance in each Cluster
+
+We study the competitive balance in each cluster using the Kedall’s tau coefficient ($\tau$). We calculate the overall $\tau$ between two seasons $S_1$ and $S_2$ from the pairwise correlations of the Relative Standard Deviations (RSD) of teams $ T_{1} \in S_{1}$  and $T_2 \in S_2$. Thus $\tau(T_1, T_2) = \tau(\text{RSD}_{T_1}, \text{RSD}_{T_2})$.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+#-------- EXAMPLE -------#
+tmp1 <- data_frame(Var1 = c("A", "B", "C", "D"))
+tmp2 <- data_frame(Var2 = c("B", "A"))
+a <- as.numeric(factor(tmp1$Var1, levels = c("A", "B", "C", "D", "E", "F")))
+b <- as.numeric(factor(tmp2$Var2, levels = c("A", "B", "C", "D", "E", "F")))
+m <- cbind(a, b)
+# cor(m, method = "kendall", use = "pairwise")
+
+#-------- END OF EXAMPLE -------#
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+tmp <- tmp %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  mutate(SD = (Win_Ratio - 0.5) ^ 2) %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  summarise(SD = sqrt(mean(SD)), Teams_Count = sum(Count/Count)) %>% 
+  dplyr::select(c(-Teams_Count)) %>% 
+  filter(Season >= 1929) 
+
+tmp <- tmp %>%
+  spread(key = Season, value = SD)
+
+
+clusters$Team <- rownames(clusters)
+
+# cluster1 is Custer 2
+cluster1 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 2) %>%
+  select(c(-Cluster))
+
+# cluster2
+cluster2 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 3) %>%
+  select(c(-Cluster))
+
+# cluster3
+cluster3 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 1) %>%
+  select(c(-Cluster))
+
+cluster1 <- cluster1 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+cluster2 <- cluster2 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+cluster3 <- cluster3 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+kendall_fun <- function(df) {
+  i <- 2
+  j <- 3
+  result <- c()
+  while (j <= ncol(df)) {
+    m <- cbind(df[, i], df[, j])
+    kendall <- (cor(m, method = "kendall", use = "pairwise")[1, 2] + 1)/2
+    result <- c(result, kendall)
+    j <- j + 1
+    i <- i + 1
+  }
+  return(result)
+}
+
+```
+
+## Competitive Balance in Cluster 1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+result <- kendall_fun(cluster1)
+season <- c(1933:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_point(size = 2, alpha = 0.5) +
+  geom_smooth(span = 0.2, size = 1.5) +
+  labs(y = "Kendall's tau coefficient", title = "Competitive balance among teams in Cluster 1")
+
+
+kendall_facet1 <- kendall_all
+kendall_facet1$Cluster <- "Cluster1"
+
+```
+
+## Competitive Balance in Cluster 2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+result <- kendall_fun(cluster2)
+season <- c(1933:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_point(size = 2, alpha = 0.5) +
+  geom_smooth(span = 0.2, size = 1.5) +
+  labs(y = "Kendall's tau coefficient", title = "Competitive balance among teams in Cluster 2")
+
+
+kendall_facet2 <- kendall_all
+kendall_facet2$Cluster <- "Cluster2"
+
+kendall_facet3 <- rbind(kendall_facet1, kendall_facet2)
+
+```
+
+## Competitive Balance in Cluster 3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+result <- kendall_fun(cluster3)
+season <- c(1933:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_point(size = 2, alpha = 0.5) +
+  geom_smooth(span = 0.2, size = 1.5) +
+  labs(y = "Kendall's tau coefficient", title = "Competitive balance among teams in Cluster 3")
+
+
+kendall_facet4 <- kendall_all
+kendall_facet4$Cluster <- "Cluster3"
+
+kendall_facet_final <- rbind(kendall_facet3, kendall_facet4)
+
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+kendall_facet_final %>%
+  ggplot(aes(x = Season, y = Kendall)) +
+  geom_point(size = 2, alpha = 0.4) +
+  geom_smooth(size = 1.5, se = F) +
+  labs(y = "Kendall's tau coefficient", x = "Year") +
+  facet_wrap( ~ Cluster, ncol = 3) +
+  labs(x = "Season") + 
+  coord_cartesian(xlim = c(1930, 2017), ylim = c(0.25, 1)) +
+  theme(axis.text.x = element_text(angle = -45, vjust = 0.5))
+  
+
+```
+
+
+# Causal Impact Analysis
+
+Causal Impact Analysis is used to estimating the causal effect of a designed intervention on a time series. In this particular case, we are interested in the change in the competitive balance after the adoption of the three point per victory system in the Spanish Football League. Answering a question like this can be difficult when a randomized experiment is not available.
+
+Given a response time series (e.g., Kendall's tau coefficients of competitive balance between sequential seasons) and a set of control time series (e.g., Win Ratios of teams across seasos), we construct a Bayesian structural time-series model. This model is then used to try and predict the counterfactual, i.e., how the competitive balance would have evolved after the intervention if the intervention had never occurred. For a quick overview, watch the [tutorial video](https://www.youtube.com/watch?v=GTgZfCltMm8). For details, see: [Brodersen et al., Annals of Applied Statistics (2015)](http://research.google.com/pubs/pub41854.html).
+
+As with all non-experimental approaches to causal inference, valid conclusions require strong assumptions. In the case of CausalImpact, we assume that there is a set control time series that were themselves not affected by the intervention. If they were, we might falsely under- or overestimate the true effect. Or we might falsely conclude that there was an effect even though in reality there wasn't. The model also assumes that the relationship between covariates and treated time series, as established during the pre-period, remains stable throughout the post-period
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+  ) %>%
+  filter(Season >= 1930) %>% 
+  mutate(Mean_Ws = mean(Ws), Mean_Ts = mean(Ts))
+
+df <- df %>%
+  group_by(Season) %>%
+  summarise(Mean_Ts_Norm = mean(Mean_Ts))
+
+df$Mean_Ts_Norm <- df$Mean_Ts_Norm/max(df$Mean_Ts_Norm)
+```
+
+## Causal Impact on Cluster 1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+cat("The following is the complete list of teams in Cluster 1:\n")
+list_clust1 <- clusters %>% filter(Cluster == 2) %>% dplyr::select(Team)
+as.vector(list_clust1$Team)
+
+
+# cluster1
+cluster1 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 2) %>%
+  select(c(-Cluster))
+
+cluster1 <- cluster1 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+y <- kendall_fun(cluster1)
+cluster1_y <- y
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1933-01-01"), by = "year", length.out = 82)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1933-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact, c("pointwise", "cumulative"))
+
+
+summary(impact)
+summary(impact, "report")
+plot(impact$model$bsts.model, "coefficients")
+matplot(data, type = "l")
+
+```
+
+## Causal Impact on Cluster 2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+cat("The following is the complete list of teams in Cluster 2:\n")
+list_clust2 <- clusters %>% filter(Cluster == 3) %>% dplyr::select(Team)
+as.vector(list_clust2$Team)
+
+# cluster2
+cluster2 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 3) %>%
+  select(c(-Cluster))
+
+
+cluster2 <- cluster2 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+y <- kendall_fun(cluster2)
+cluster2_y <- y
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1933-01-01"), by = "year", length.out = 82)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1933-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact, c("pointwise", "cumulative"))
+
+summary(impact)
+summary(impact, "report")
+# matplot(data, type = "l")
+
+
+
+
+
+
+```
+
+## Causal Impact on Cluster 3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+cat("The following is the complete list of teams in Cluster 3:\n")
+list_clust3 <- clusters %>% filter(Cluster == 1) %>% dplyr::select(Team)
+as.vector(list_clust3$Team)
+
+# cluster3
+cluster3 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 1) %>%
+  select(c(-Cluster))
+
+
+cluster3 <- cluster3 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+y <- kendall_fun(cluster3)
+cluster3_y <- y
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1933-01-01"), by = "year", length.out = 82)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1933-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact, c("pointwise", "cumulative"))
+
+
+summary(impact)
+summary(impact, "report")
+
+
+
+```
+
+
+# Forecasting
+
+# Frank Davemport tutorial
+
+```{r}
+
+
+#--Produces a data.frame with the Source Data+Training Data, Fitted Values+Forecast Values, forecast data Confidence Intervals
+funggcast <- function(dn, fcast) {
+  require(zoo) #needed for the 'as.yearmon()' function
+  
+  en <-
+    max(time(fcast$mean)) #extract the max date used in the forecast
+  
+  #Extract Source and Training Data
+  ds <- as.data.frame(window(dn, end = en))
+  names(ds) <- 'observed'
+  ds$date <- as.Date(time(window(dn, end = en)))
+  
+  #Extract the Fitted Values (need to figure out how to grab confidence intervals)
+  dfit <- as.data.frame(fcast$fitted)
+  dfit$date <- as.Date(time(fcast$fitted))
+  names(dfit)[1] <- 'fitted'
+  
+  ds <-
+    merge(ds, dfit, all.x = T) #Merge fitted values with source and training data
+  
+  #Exract the Forecast values and confidence intervals
+  dfcastn <- as.data.frame(fcast)
+  dfcastn$date <- as.Date(as.yearmon(row.names(dfcastn)))
+  names(dfcastn) <- c('forecast', 'lo80', 'hi80', 'lo95', 'hi95', 'date')
+  
+  pd <- merge(ds, dfcastn, all.x = T) #final data.frame for use in ggplot
+  return(pd)
+  
+}
+
+
+#----------Simulate an Arima (2,1,1) Process-------------
+library(forecast)
+
+set.seed(1234)
+y <- arima.sim(model = list(
+  order = c(2, 1, 1),
+  ar = c(0.5, .3),
+  ma = 0.3
+), n = 144)
+
+
+y <- ts(y, freq = 12, start = c(2000, 1))
+
+cluster1_y <- ts(cluster1_y, start = 1936, end = 2017, frequency = 1, deltat = 12)
+
+#-- Extract Training Data, Fit the Wrong Model, and Forecast
+yt <- window(y, end = 2009.99)
+
+yt <- window(cluster1_y, end = 2009.99)
+
+yfit <- Arima(yt, order = c(1, 0, 1))
+
+yfor <- forecast(yfit)
+
+#---Extract the Data for ggplot using funggcast()
+pd <- funggcast(y, yfor)
+
+#---Plot in ggplot2 0.9
+library(ggplot2)
+library(scales)
+
+
+p1a <- ggplot(data = pd, aes(x = date, y = observed))
+p1a <- p1a + geom_line(col = 'red')
+p1a <- p1a + geom_line(aes(y = fitted), col = 'blue')
+p1a <-
+  p1a + geom_line(aes(y = forecast)) + geom_ribbon(aes(ymin = lo95, ymax =
+                                                         hi95), alpha = .25)
+# p1a <-
+#   p1a + scale_x_date(
+#     name = "fasdf",
+#     breaks = "1 year",
+#     minor_breaks = "1 month",
+#     labels = date_format("%b-%y"),
+#     expand = c(0, 0)
+#   )
+# p1a <- p1a + scale_y_continuous(name = 'Units of Y')
+
+
+
+p1a <-
+  p1a + labs(title = 'Arima Fit to Simulated Data\n (black=forecast, blue=fitted, red=data, shadow=95% conf. interval)')
+p1a
+
+
+
+
+
+
+```
+
+
+## forecast + ggplot2 tutorial
+
+```{r}
+
+cluster1_y <- ts(cluster1_y, start = 1936, end = 2017, frequency = 1, deltat = 12)
+autoplot(cluster1_ts)
+
+fit <- auto.arima(cluster1_y, D=3)
+autoplot(fit)
+
+fc <- forecast(cluster3_y,  h=20)
+autoplot(fc)
+
+fit <- ets(cluster1_y)
+autoplot(fit)
+
+ggtsdisplay(cluster1_y)
+
+
+
+cluster1_y %>%
+  ets(lambda = -0.57) %>%
+  forecast(h = 60) %>%
+  autoplot()
+
+
+cluster1_y <- ts(cluster1_y, start = 1936, end = 2017, frequency = 1, deltat = 12)
+fit <- auto.arima(cluster1_y)
+fit %>% forecast(h = 13) %>% autoplot()
+
+cluster2_y <- ts(cluster2_y, start = 1936, end = 2017, frequency = 1, deltat = 12)
+fit <- auto.arima(cluster2_y)
+fit %>% forecast(h = 13) %>% autoplot()
+
+cluster3_y <- ts(cluster3_y, start = 1936, end = 2017, frequency = 1, deltat = 12)
+fit <- auto.arima(cluster3_y)
+fit %>% forecast(h = 13) %>% autoplot()
+
+```
+
+
+
+# Conclusions
+
+From the results obtained, we can derive the following conclusions regarding the adoption of the three points score system in the Spanish Football League:
+
+1. The overall Competitive Balance of the league decreases after the adoption of the new Score System. This has sense due to the possible point’s increment of the leaders’ teams, which augment the gap between top teams and the rest of teams.
+
+2. The Causal Impact analysis of the Cluster 1 (intermediate teams) shows a **moderate increase** in the competitive balance across intermediate teams after the adoption of the new Score System.
+
+3. The Causal Impact analysis of the Cluster 2 (top teams) shows a **significant decrease** in the competitive balance across top teams after the adoption of the new Score System. 
+
+4. The Causal Impact analysis of the Cluster 3 (poor teams) shows a **moderate decrease** in the competitive balance across poor teams after the adoption of the new Score System. 

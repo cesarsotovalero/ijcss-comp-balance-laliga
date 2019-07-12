@@ -1,0 +1,385 @@
+---
+title: "Ranking Spanish Football Teams Using Beta-Binomial Regression"
+author: "Cesar Soto Valero"
+fig_caption: TRUE
+date: "Feb 18, 2018"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_retina: 2
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# import libraries
+library(tidyverse)
+library(ggrepel)
+library(ggpubr)
+library(ggridges)
+library(ggcorrplot)
+library(caret)
+library(factoextra)
+library(Boruta)
+library(randomForest)
+library(DT)
+library(RANN)
+library(car)
+library(MASS)
+library(gplots)
+library(multcomp)
+library(psych)
+library(plotly)
+library(lubridate)
+library(MASS)
+library(broom)
+
+theme_set(theme_bw())
+
+load(file = "data/data.RData")
+
+```
+# Introduction
+
+What is the best Spanish football team of all time, and why? This is a very interesting question for football's fans all over the world. In this report, I will answer this question by comparing teams' performance during a period of 90 years (since 1927 to 2017) using empirical bayes distributions.
+
+## Comparison based on Win Ratios
+
+First, we define the Win Ratio ($\text{WR}$) of a team $t$ as follow
+
+$$
+\begin{equation}
+\text{WR}_t = \dfrac{W_t}{W_t + L_t + D_t} 
+\end{equation}
+$$
+
+
+where $W = \text{Games Win}$, $L = \text{Games Lost}$ and $D = \text{Ties}$
+
+Now we can compare the performance of teams according to its $\text{WRs}$ over time. The following figure shows the loess smooth curves of ($\text{WR}$) values for six popular teams. According to the figure, we can see that *Real Madrid* has the best ($\text{WR}$) for the last 10 years, but it is followed closely by *Barcelona*.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#  Barcelona
+barcelona <- data %>% group_by(Season, Team) %>% filter(Team == "Barcelona")
+barcelona <- as.data.frame(table(barcelona$Season, barcelona$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Barcelona") %>% 
+  rename(Season = "Team")
+
+
+#  Real Madrid
+real_madrid <- data %>% group_by(Season, Team) %>% filter(Team == "Real Madrid")
+real_madrid <- as.data.frame(table(real_madrid$Season, real_madrid$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Real Madrid") %>% 
+  rename(Season = "Team")
+
+
+# Atlético de Madrid
+atletico_madrid <- data %>% group_by(Season, Team) %>% filter(Team == "Atlético de Madrid")
+atletico_madrid <- as.data.frame(table(atletico_madrid$Season, atletico_madrid$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Atlético de Madrid") %>% 
+  rename(Season = "Team")
+
+
+#  Valencia
+valencia <- data %>% group_by(Season, Team) %>% filter(Team == "Valencia")
+valencia <- as.data.frame(table(valencia$Season, valencia$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Valencia") %>% 
+  rename(Season = "Team")
+
+
+#  Sevilla
+sevilla <- data %>% group_by(Season, Team) %>% filter(Team == "Sevilla")
+sevilla <- as.data.frame(table(sevilla$Season, sevilla$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Sevilla") %>% 
+  rename(Season = "Team")
+
+#  Villarreal
+real_sociedad <- data %>% group_by(Season, Team) %>% filter(Team == "Real Sociedad")
+real_sociedad <- as.data.frame(table(real_sociedad$Season, real_sociedad$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Real Sociedad") %>% 
+  rename(Season = "Team")
+
+#  Espanyol
+espanyol <- data %>% group_by(Season, Team) %>% filter(Team == "Espanyol")
+espanyol <- as.data.frame(table(espanyol$Season, espanyol$Game_Result)) %>% 
+  spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G + E), Games_Played = (P + G + E), Team_Name = "Espanyol") %>% 
+  rename(Season = "Team")
+
+# bind the data frames
+teams <- rbind(espanyol,barcelona, real_madrid,atletico_madrid, valencia, sevilla, real_sociedad)
+
+teams$Season <- as.Date(as.character(teams$Season), format = "%Y")
+teams %>% ggplot(aes(Season, color = Team_Name)) +
+  geom_smooth(aes(y=Win_Ratio), fill=NA, span = 0.2) +
+  # geom_point(aes(y = Win_Ratio, shape = Team_Name), size = 2) +
+  # geom_line(aes(y = Win_Ratio), size = .05) +
+  scale_color_brewer(palette="Dark2") +
+ 
+  labs(x = "Year", y = "Win Ratio (WR)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_x_date(date_labels = "%Y", date_breaks = "10 years") +
+   theme(legend.position = "top") +
+  theme(legend.title=element_blank())
+
+
+data %>% 
+  group_by(Season, Team) %>%
+  filter(Team == "Espanyol") %>%
+  summarise(Goals_Scored_Total = sum(Goals_Scored), Goals_Received_Total = sum(Goals_Received) ) %>% 
+  mutate(PE = Goals_Scored_Total * Goals_Scored_Total / (Goals_Scored_Total * Goals_Scored_Total + Goals_Received_Total * Goals_Received_Total))
+  
+```
+
+
+
+The following Figure shows the likehoods between the $\text{WRs}$ and the total number of games played all time. As we can see, there are teams such as *Atlético Aviación* with a high $\text{WR}$ but less than 200 games played. This make the comparison unfair because we cannot say that *Atlético Aviación* is better than *Atlético de Madrid* just because it has a higher $\text{WR}$ value. So we need a better ranking approach, called Beta-Binomial regression.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+tmp <- as.data.frame(table(data$Team, data$Game_Result))
+tmp <- tmp %>% spread(key = Var2, value = Freq) %>%
+  rename("Team" = Var1) %>%
+  mutate(Win_Ratio = G / (P + G+ E), Games_Played = (P + G + E)) %>%
+  arrange(desc(Games_Played))
+
+
+
+start <- list(shape1 = 1, shape2 = 10)
+
+m <- MASS::fitdistr(tmp$Win_Ratio, dbeta, start)
+
+alpha0 <- m$estimate[1]
+beta0 <- m$estimate[2]
+prior_mu <- alpha0 / (alpha0 + beta0)
+
+# For each team, update the beta prior based on the evidence
+# to get posterior parameters alpha1 and beta1
+career_eb <- tmp %>%
+  mutate(eb_estimate = (G + alpha0) / (Games_Played + alpha0 + beta0)) %>%
+  mutate(alpha1 = G + alpha0,
+    beta1 = Games_Played - G + beta0) %>%
+  arrange(desc(eb_estimate))
+
+
+set.seed(6)
+tmp %>%
+  filter(Games_Played >= 1) %>%
+  ggplot(aes(Games_Played, Win_Ratio)) +
+  geom_smooth() +
+  geom_point(color = "black", size = 4) +
+  geom_point(color = "white", size = 2.5) +
+  labs(x = "Total games played", y = "Win Ratio (WR)") +
+  geom_text_repel(aes(label = Team), na.rm = TRUE, nudge_y = 0.05, size = 3, nudge_x = 0.07) +
+  scale_x_continuous(breaks = c(200, 600, 1000, 1400, 1800, 2200, 2600)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1)) 
+
+```
+
+## Rankig teams via Beta-Binomial regression
+
+So we  we want to fit the following model according to the $\text{WRs}$ of all teams $T$:
+
+$$
+\begin{equation}
+X \sim Beta(\alpha_T, \beta_T)
+\end{equation}
+$$
+This model is based on adjusting the distribution of $\text{WRs}$ of all teams.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# distribution of Win Ratios across teams fixed to the Beta Distribution
+career_eb %>% ggplot(aes(Win_Ratio)) +
+  geom_histogram(fill = "#d87a00") +
+  geom_density(aes(eb_estimate), size = 1) +
+  labs(x = "Win Ratio", title = "Distribution of Win Ratios across all teams")
+
+
+
+```
+
+
+The adjust give us $\alpha = 10.73351$ and $\beta = 23.01184$. In order to rank the team $t \in T$ according to is Empirical Bayes (EB) estimates, we use the following equation
+
+$$
+\begin{equation}
+EB_t = \dfrac{W_t + \alpha_t}{(W + L + D)_t + \alpha_t + \beta_t}  
+\end{equation}
+$$
+
+The following table shows the all time rank of teams in the Spanish League according to our Beta-Binomial Regression.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+ranking <- career_eb %>% select(-c(alpha1, beta1))
+DT::datatable(ranking, style = "bootstrap", fillContainer = TRUE )
+
+```
+
+
+The above table can be illustrated graphically by taking in account the confidence intervals. In the following figure the teams are sorted in order of the number of games played (thus, how much information we have about them). Notice that once there’s enough information, the credible intervals and confidence intervals are nearly identical. But for the 7/29 and 6/29 cases (*Atlético Tetuán* and *Condan*, respectively), the credible interval is much narrower. This is because empirical Bayes brings in our knowledge from the full data, just as it did for the point estimate.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+set.seed(2015)
+some <- career_eb %>%
+    mutate(name = paste0(Team, " (", G, "/", Games_Played, ")"))
+
+frequentist <- some %>%
+    group_by(Team, name, Games_Played) %>%
+    do(tidy(binom.test(.$G, .$Games_Played))) %>%
+    select(Team, name, estimate, low = conf.low, high = conf.high) %>%
+    mutate(method = "Confidence")
+
+some <- some %>%
+    mutate(low = qbeta(.025, alpha1, beta1),
+           high = qbeta(.975, alpha1, beta1))
+
+bayesian <- some %>%
+    select(Team, name, Games_Played, estimate = eb_estimate,
+           low = low, high = high) %>%
+  mutate(method = "Credible")
+
+combined <- bind_rows(frequentist, bayesian)
+
+combined <- combined %>% ungroup() %>%
+  mutate(name = reorder(name, Games_Played))
+
+combined %>%
+  ggplot(aes(estimate, name, color = method, group = method)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = low, xmax = high)) +
+  geom_vline(xintercept = 0.3180738,
+             color = "red",
+             lty = 2) +
+  theme(axis.text.y = element_text(size = 5)) +
+  xlab("Estimated EB (w/ 95% interval)") +
+  ylab("Team") +
+  scale_color_manual(values=c("red", "blue")) +
+  theme(legend.position = "right") +
+  theme(legend.title = element_blank())
+
+```
+
+
+The vertical dashed red line is $\frac{\alpha_0}{\alpha_0 + \beta_0}$: the mean EB across history (based on our beta fit) for all teams.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

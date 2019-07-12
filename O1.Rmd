@@ -1,0 +1,1092 @@
+---
+title: "Causal Impact of Adopting the Three Points per Victory based System on the Competitive Balance of Spanish Football League"
+author: "Cesar Soto Valero"
+fig_caption: TRUE
+date: "Mar 5, 2018"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    fig_retina: 2
+  html_notebook: default
+  pdf_document: default
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# import libraries
+library(tidyverse)
+library(dtw)
+library(dtwclust)
+library(ggpubr)
+library(ggridges)
+library(ggcorrplot)
+library(caret)
+library(factoextra)
+library(Boruta)
+library(randomForest)
+library(DT)
+library(ggridges)
+library(RANN)
+library(car)
+library(MASS)
+library(gplots)
+library(multcomp)
+library(psych)
+library(plotly)
+library(lubridate)
+library(dendextend)
+library(broom)
+library(NbClust)
+library(fpc)
+library(devtools)
+library(CausalImpact)
+
+theme_set(theme_bw())
+
+
+load(file = "data/data.RData")
+
+
+```
+
+# Introduction
+
+The competition format of the [Spanish Football League](https://en.wikipedia.org/wiki/La_Liga) follows the usual double round-robin format. During the course of a season, which lasts from August to May, each club plays every other club twice, once at home and once away, for a total of 38 matchdays. Teams receive three points for a win, one point for a draw, and no points for a loss. Teams are ranked by total points, with the highest-ranked club at the end of the season crowned champion.
+
+# Standard Measures of Teams' Performance
+
+## WR
+
+The Win Ratio ($\text{WR}$) of a team $t$ as follow
+
+$$
+\begin{equation}
+\text{WR}_t = \dfrac{W_t}{W_t + L_t + D_t} 
+\end{equation}
+$$
+
+
+where $W = \text{Games Win}$, $L = \text{Games Lost}$ and $D = \text{Ties}$
+
+
+# Standard Measures of CB
+
+## SD
+
+Is the ratio of the actual standard deviation to an idealized standard deviation. The ideal ratio is 1. The higher the ratio, the more the actual spread diverges from the ideal one and hence the worse the competitive balance.
+
+$$
+\begin{equation}
+\text{SD} = \sqrt{\sum_{i=1}^{n}\dfrac{w_i - \text{avg_wins}}{n}} 
+\end{equation}
+$$
+
+where $W_i$ is the proportion of wins of team $i$.
+
+
+## RE
+
+Relative entropy
+
+$$
+\begin{equation}
+\text{AC} = \dfrac{H}{H_M}
+\end{equation}
+$$
+
+with
+
+
+$$
+\begin{equation}
+\text{H} = - \sum_{i=1}^{n}p_i \lg_2p_i 
+\end{equation}
+$$
+
+where
+
+$i$ = team; $n$ = total nr of teams; $p_i$ = the proportion of the league victories of team $i$.
+$H_M$ = maximal entropy: every team has the same share of victories: $p_i = 1/n$
+
+
+## NAMSI
+
+When all teams win half of their games or all games are ended in a tie complete balance occurs. The standard deviation of the season equals zero since the win percentage of all teams is 0,5. Hence the NAMSI will equal zero. If there is absolute certainty about who wins the game the seasonal standard deviation equals the certainty standard deviation and so NAMSI equals 1. This is the situation of complete imbalance. So the NAMSI ranges between 0 and 1. When comparing two seasons or two countries a higher NAMSI indicates a higher seasonal imbalance.
+
+$$
+\begin{equation}
+\text{NAMSI} = \sqrt{\dfrac{\sum_{i=1}^{n}(w_i - 1/2)^2}{\sum_{i=1}^{n}(w_{i,\text{max}} - 1/2)^2}}
+\end{equation}
+$$
+
+## HICB
+
+
+$$
+\begin{equation}
+\text{HICB} = 100n\sqrt{s_{i}^2}
+\end{equation}
+$$
+where $s_i$ is the ratio of points scored in a season by team $i$. 
+
+
+
+## HHIN
+
+Is a normalised version of HHI (HHIN) 
+
+$$
+\begin{equation}
+\text{HHIN} = \dfrac{HHI - 1/n}{1-1/n}
+\end{equation}
+$$
+
+
+## AC
+
+Adjusted Churn is calculated as:
+
+
+$$
+\begin{equation}
+\text{C}_t = \dfrac{1}{n}\sqrt{|c_{i,t} - c_{i,t-1}|}
+\end{equation}
+$$
+
+where $s_i$ is the ranking of team $i$ in season $t$. Then the adjusted Churn is defined as
+
+$$
+\begin{equation}
+\text{AC} = \dfrac{C_t}{C_{t,max}}
+\end{equation}
+$$
+
+where $C_{t,max}$ is the maximum value of $C_t$ given a league of n teams.
+
+
+
+
+
+# Analysis of CB
+
+## SD analysis
+
+In general, the highesr is SD the lower is the CB (and the higher is the *competitive unequality*)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+SD <- tmp %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  mutate(SD = (Win_Ratio - 0.5) ^ 2) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(SD = sqrt(mean(SD)), Teams_Count = sum(Count/Count))
+
+
+SD %>% ggplot(aes(Season, SD)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+## RE analysis
+
+The maximun entropy for 20 teams is: 4.32192809488736
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+fun_HM <- function(n) {
+  i <-  1
+  HM <- 0
+  for (i in 1:n) {
+    HM <-  HM + (-1 * sum((1 / n) * log2((1 / n))))
+  }
+  return(dplyr::data_frame(HM = HM))
+}
+
+# cat(paste("The maximun entropy for 20 teams is", fun_HM(20)))
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts)) %>% 
+  ungroup() %>% 
+  group_by(Season) %>% 
+  summarise(H = -1*sum(Win_Ratio*log2(Win_Ratio)))
+
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n()) 
+
+
+hm <- n_teams %>% ungroup() %>% group_by(Season) %>% do(fun_HM(n =.$Count))
+
+RE <- full_join(df,hm, by = "Season") %>% mutate(RE = H/HM)
+
+RE %>% ggplot(aes(Season, RE)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+
+
+## NAMSI analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# auxiliar function that returns the denominator
+my_fun <- function(n) {
+  n <- n-1
+  i <- 1
+  result <- 0
+  while (i < n-1) {
+    result <- result + ((n - i) / (n - 1) - 0.5) ^ 2
+    i <- i +1
+  }
+  return(dplyr::data_frame(result = result))
+}
+
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n()) 
+
+# denominator
+denominator <- n_teams %>% 
+  ungroup() %>%
+  group_by(Season) %>%
+  do(my_fun(n=.$Count)) %>% 
+  mutate(denominator = sqrt(result))
+
+# numerator
+numerator <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(numerator = sqrt(sum((Win_Ratio - 0.5) ^ 2)))
+
+
+NAMSI <- full_join(denominator, numerator, by = "Season") %>% 
+  mutate(NAMSI = numerator/denominator)
+
+NAMSI %>% ggplot(aes(Season, NAMSI)) +
+  geom_line() +
+  geom_smooth(span = 0.2)
+
+```
+
+## HICB analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  mutate(S_quared = Total_Points ^ 2)
+
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+# total points
+total_points <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Total_Points_Season = sum(Total_Points))
+
+tmp <- full_join(df, n_teams, by = "Season")
+tmp <- full_join(tmp, total_points, by = "Season")
+
+HICB <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(HICB = sum(Count / Count) * 100 * (sum((
+    Total_Points / Total_Points_Season
+  ) ^ 2)))
+
+HICB %>% ggplot(aes(Season, HICB)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+
+## HHIN analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  mutate(S_quared = Total_Points ^ 2)
+
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+# total points
+total_points <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Total_Points_Season = sum(Total_Points))
+
+tmp <- full_join(df, n_teams, by = "Season")
+tmp <- full_join(tmp, total_points, by = "Season")
+
+
+HHIN <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise( HHIN = 100*(((sum((Total_Points / Total_Points_Season) ^ 2)) - 1/(sum(Count / Count))) / (1 - 1/(sum(Count / Count)))))
+
+
+HHIN %>% ggplot(aes(Season, HHIN)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+
+
+
+```
+
+
+## AC analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>% 
+  filter(Team == "Barcelona")
+
+i <- 2
+c <- c(1:nrow(df))
+for (i in 1:nrow(df)) {
+  c[i-1] <- abs(df$Total_Points[i] - df$Total_Points[i - 1])
+}
+
+plot(c, type = "l", xlab = "Seasons", ylab = "AC", main = "Points difference of Barcelona across seasons" )
+
+```
+
+
+# Clustering of Teams based on Teams' Performance
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# data preprocessing
+df <-
+  data %>% 
+  group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts)) %>% 
+  dplyr::select(Season, Team, Win_Ratio) %>% 
+  ungroup() 
+
+
+df_t <- df %>% spread(key = Season, value = Win_Ratio) 
+
+
+df_t$Team <- as.character(df_t$Team)
+
+
+
+# inpute missing values with the mean
+df <- df_t  %>% mutate_all(funs(ifelse(is.na(.), 0, .))) 
+
+rownames(df) <- df$Team
+df$Team <- NULL
+
+```
+
+## Hierarchical K-Means Clustering
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(proxy)
+res.hk <- hkmeans(df, 3)
+# Elements returned by hkmeans()
+
+
+# Visualize the tree
+fviz_dend(
+  res.hk,
+  cex = 0.4,
+  palette = "Set1",
+  rect = TRUE
+)
+
+# Visualize the hkmeans final clusters
+fviz_cluster(res.hk,
+             palette = "jco",
+             repel = TRUE,
+             ggtheme = theme_classic())
+
+
+clusters <- as.data.frame(res.hk$cluster) %>% dplyr::rename(Cluster = "res.hk$cluster")
+names <- as.data.frame(row.names(clusters)) %>% dplyr::rename(Team = "row.names(clusters)")
+
+clusters$Team <- names$Team
+
+
+
+
+```
+
+
+# DTW clustering
+
+Obtained clusters and their respective prototypes (centroids) shown as dashed lines.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+require("cluster")
+hc_dtw <- tsclust(
+  df,
+  type = "h",
+  k = 3L,
+  distance = "dtw_basic",
+  control = hierarchical_control(method = diana),
+  args = tsclust_args(dist = list(window.size = 18L))
+)
+
+# By default, the dendrogram is plotted in hierarchical clustering
+# plot(hc_dtw, xlab = "Teams", main = "Cluster Dendrogram of Stations", cex = 0.5)
+
+# Obtained clusters and their respective prototypes (centroids) shown as dashed lines.
+plot(hc_dtw, type = "sc")
+
+# Prototype obtained by applying shape extraction to cluster 3
+plot(hc_dtw, type = "centroids", clus = 1L)
+plot(hc_dtw, type = "centroids", clus = 2L)
+plot(hc_dtw, type = "centroids", clus = 3L)
+```
+
+
+
+
+# Analysis of CB for Teams' Clusters
+
+## Analysis of Elite Teams
+
+
+### NAMSI analysis of Cluster 2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# auxiliar function that returns the denominator
+my_fun <- function(n) {
+  n <- n-1
+  i <- 1
+  result <- 0
+  while (i < n-1) {
+    result <- result + ((n - i) / (n - 1) - 0.5) ^ 2
+    i <- i + 1
+  }
+  return(dplyr::data_frame(result = result))
+}
+
+
+# --------------
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+
+# filter data for elite teams
+elite <- full_join(tmp, clusters, by = "Team") %>% filter(Cluster == 2)
+
+# --------------
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Win_Ratio = sum(Win_Ratio)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n()) 
+
+# denominator
+denominator <- n_teams %>% 
+  ungroup() %>%
+  group_by(Season) %>%
+  do(my_fun(n=.$Count)) %>% 
+  mutate(denominator = sqrt(result))
+
+# numerator
+numerator <- elite %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(numerator = sqrt(sum((Win_Ratio - 0.5) ^ 2)))
+
+
+NAMSI <- full_join(denominator, numerator, by = "Season") %>% 
+  mutate(NAMSI = numerator/denominator)
+
+
+NAMSI %>% ggplot(aes(Season, NAMSI)) +
+  geom_line() +
+  geom_smooth(span = 0.2)
+
+```
+
+### HICB analysis of Cluster 2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  mutate(S_quared = Total_Points ^ 2)
+
+# filter data for elite teams
+elite <- full_join(df, clusters, by = "Team") %>% filter(Cluster == 2)
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+# total points
+total_points <- df %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Total_Points_Season = sum(Total_Points))
+
+tmp <- full_join(elite, n_teams, by = "Season")
+tmp <- full_join(tmp, total_points, by = "Season")
+
+HICB <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(HICB = sum(Count / Count) * 100 * (sum((
+    Total_Points / Total_Points_Season
+  ) ^ 2)))
+
+HICB %>% ggplot(aes(Season, HICB)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+## Analysis of Regular Teams
+
+### NAMSI analysis of Cluster 1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# auxiliar function that returns the denominator
+my_fun <- function(n) {
+  n <- n-1
+  i <- 1
+  result <- 0
+  while (i < n-1) {
+    result <- result + ((n - i) / (n - 1) - 0.5) ^ 2
+    i <- i +1
+  }
+  return(dplyr::data_frame(result = result))
+}
+
+
+# --------------
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+
+# filter data for elite teams
+elite <- full_join(tmp, clusters, by = "Team") %>% filter(Cluster == 1)
+
+# --------------
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Win_Ratio = sum(Win_Ratio)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n()) 
+
+# denominator
+denominator <- n_teams %>% 
+  ungroup() %>%
+  group_by(Season) %>%
+  do(my_fun(n=.$Count)) %>% 
+  mutate(denominator = sqrt(result))
+
+# numerator
+numerator <- elite %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(numerator = sqrt(sum((Win_Ratio - 0.5) ^ 2)))
+
+NAMSI <- full_join(denominator, numerator, by = "Season") %>% 
+  mutate(NAMSI = ifelse(denominator == 0, 0, numerator/denominator))
+
+mean <- mean(NAMSI$NAMSI)
+
+NAMSI <- NAMSI %>% 
+  mutate(NAMSI = ifelse(denominator == 0, mean, numerator/denominator))
+
+
+NAMSI %>% ggplot(aes(Season, NAMSI)) +
+  geom_line() +
+  geom_smooth(span = 0.2)
+
+```
+
+### HICB analysis of Cluster 1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  mutate(S_quared = Total_Points ^ 2)
+
+# filter data for elite teams
+elite <- full_join(df, clusters, by = "Team") %>% filter(Cluster == 1)
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+# total points
+total_points <- df %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Total_Points_Season = sum(Total_Points))
+
+tmp <- full_join(elite, n_teams, by = "Season")
+tmp <- full_join(tmp, total_points, by = "Season")
+
+HICB <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(HICB = sum(Count / Count) * 100 * (sum((
+    Total_Points / Total_Points_Season
+  ) ^ 2)))
+
+HICB %>% ggplot(aes(Season, HICB)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+
+
+## Analysis of Poor Teams
+
+### NAMSI analysis of Cluster 3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# auxiliar function that returns the denominator
+my_fun <- function(n) {
+  n <- n-1
+  i <- 1
+  result <- 0
+  while (i < n-1) {
+    result <- result + ((n - i) / (n - 1) - 0.5) ^ 2
+    i <- i +1
+  }
+  return(dplyr::data_frame(result = result))
+}
+
+
+# --------------
+
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+
+# filter data for elite teams
+elite <- full_join(tmp, clusters, by = "Team") %>% filter(Cluster == 3)
+
+# --------------
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Win_Ratio = sum(Win_Ratio)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())  
+
+# denominator
+denominator <- n_teams %>% 
+  ungroup() %>%
+  group_by(Season) %>%
+  do(my_fun(n=.$Count)) %>% 
+  mutate(denominator = sqrt(result))
+
+# numerator
+numerator <- elite %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(numerator = sqrt(sum((Win_Ratio - 0.5) ^ 2)))
+
+
+NAMSI <- full_join(denominator, numerator, by = "Season") %>% 
+  mutate(NAMSI = ifelse(denominator == 0, 0, numerator/denominator))
+
+
+NAMSI %>% ggplot(aes(Season, NAMSI)) +
+  geom_line() +
+  geom_smooth(span = 0.2)
+
+```
+
+
+### HICB analysis of Cluster 3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# S squared
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  mutate(S_quared = Total_Points ^ 2)
+
+# filter data for elite teams
+elite <- full_join(df, clusters, by = "Team") %>% filter(Cluster == 3)
+
+
+# number of teams
+n_teams <- elite %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+# total points
+total_points <- df %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Total_Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Total_Points_Season = sum(Total_Points))
+
+tmp <- full_join(elite, n_teams, by = "Season")
+tmp <- full_join(tmp, total_points, by = "Season")
+
+HICB <- tmp %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(HICB = sum(Count / Count) * 100 * (sum((
+    Total_Points / Total_Points_Season
+  ) ^ 2)))
+
+HICB %>% ggplot(aes(Season, HICB)) +
+  geom_line()+
+  geom_smooth(span = 0.2)
+
+```
+
+
+# Kendall
+
+## Based on Total points
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+#-------- EXAMPLE -------#
+tmp1 <- data_frame(Var1 = c("0.0", "0.5", "0.75"))
+tmp2 <- data_frame(Var2 = c("0.1", "0.0", "0.2"))
+
+tmp1$Var1 <- as.numeric(tmp1$Var1)
+tmp2$Var2 <- as.numeric(tmp2$Var2)
+
+# a <- as.numeric(factor(tmp1$Var1, levels = c("A", "B", "C", "D", "E", "F")))
+# <- as.numeric(factor(tmp2$Var2, levels = c("A", "B", "C", "D", "E", "F")))
+m <- cbind(tmp1, tmp2)
+cor(m, method = "kendall", use = "pairwise")
+
+#-------- END OF EXAMPLE -------#
+
+```
+
+## Based on SD
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+df <-
+  data %>% group_by(Season, Team) %>% 
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+    ) %>% 
+  mutate(Win_Ratio = Ws / (Ws + Ls + Ts))
+
+# number of teams
+n_teams <- data %>%
+  group_by(Season, Team) %>%
+  summarise(Total_Points = sum(Points)) %>%
+  ungroup() %>%
+  group_by(Season) %>%
+  summarise(Count = n())
+
+tmp <- full_join(df, n_teams, by = "Season")
+
+tmp <- tmp %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  mutate(SD = (Win_Ratio - 0.5) ^ 2) %>%
+  ungroup() %>%
+  group_by(Season, Team) %>%
+  summarise(SD = sqrt(mean(SD)), Teams_Count = sum(Count/Count)) %>% 
+  dplyr::select(c(-Teams_Count)) %>% 
+  filter(Season >= 1941) 
+
+tmp <- tmp %>%
+  spread(key = Season, value = SD)
+
+# cluster1
+cluster1 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 1) %>%
+  select(c(-Cluster))
+
+# cluster2
+cluster2 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 2) %>%
+  select(c(-Cluster))
+
+# cluster3
+cluster3 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 3) %>%
+  select(c(-Cluster))
+
+# visualize the clusters
+DT::datatable(cluster1, style = "bootstrap", fillContainer = TRUE)
+DT::datatable(cluster2, style = "bootstrap", fillContainer = TRUE)
+DT::datatable(cluster3, style = "bootstrap", fillContainer = TRUE)
+
+
+cluster1 <- cluster1 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+cluster2 <- cluster2 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+cluster3 <- cluster3 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+kendall_fun <- function(df) {
+  i <- 2
+  j <- 3
+  result <- c()
+  while (j <= ncol(df)) {
+    m <- cbind(df[, i], df[, j])
+    kendall <- cor(m, method = "kendall", use = "pairwise")[1, 2]
+    result <- c(result, kendall)
+    j <- j + 1
+    i <- i + 1
+  }
+  return(result)
+}
+
+result <- kendall_fun(cluster1)
+season <- c(1942:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_smooth(span = 0.2, size = 2) +
+  geom_line(size = 1) +
+  labs(title = "Cluster 1")
+
+result <- kendall_fun(cluster2)
+season <- c(1942:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_smooth(span = 0.2, size = 2) +
+  geom_line(size = 1) +
+  labs(title = "Cluster 2")
+
+result <- kendall_fun(cluster3)
+season <- c(1942:2017)
+kendall_all <- data_frame(Kendall = result, Season = season)
+kendall_all %>% ggplot(aes(x = Season, y = Kendall)) +
+  geom_smooth(span = 0.2, size = 2) +
+  geom_line(size = 1) +
+  labs(title = "Cluster 3")
+
+
+```
+
+
+# Causal Impact Analysis
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+df <-
+  data %>% group_by(Season, Team) %>%
+  summarise(
+    Ws = sum(Game_Result == "G"),
+    Ls = sum(Game_Result == "P"),
+    Ts = sum(Game_Result == "E")
+  ) %>%
+  filter(Season >= 1942) %>%
+  summarise(Mean_Ts = mean(Ts)) %>% 
+  mutate(Mean_Ts_Norm = Mean_Ts/max(Mean_Ts))
+
+
+# cluster1
+cluster1 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 1) %>%
+  select(c(-Cluster))
+
+cluster1 <- cluster1 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+
+y <- kendall_fun(cluster1)
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1941-01-01"), by = "year", length.out = 77)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1941-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact)
+
+
+
+# cluster2
+cluster2 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 2) %>%
+  select(c(-Cluster))
+
+cluster2 <- cluster2 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+
+y <- kendall_fun(cluster2)
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1941-01-01"), by = "year", length.out = 77)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1941-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact)
+
+
+
+
+# cluster3
+cluster3 <- full_join(tmp, clusters, by = "Team") %>%
+  filter(Cluster == 3) %>%
+  select(c(-Cluster))
+
+cluster3 <- cluster3 %>% mutate_all(funs(ifelse(is.na(.), 0, .)))
+
+
+y <- kendall_fun(cluster3)
+x1 <- as.numeric(df$Mean_Ts_Norm)
+time.points <- seq.Date(as.Date("1941-01-01"), by = "year", length.out = 77)
+
+data <- zoo(cbind(y, x1), time.points)
+
+pre.period <- as.Date(c("1941-01-01", "1996-03-11"))
+post.period <- as.Date(c("1997-01-01", "2017-03-11"))
+
+impact <- CausalImpact(data, pre.period, post.period)
+plot(impact)
+```
+
+
+
+
+
